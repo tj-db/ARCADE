@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PONDER</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            cursor: none;
+        }
+
+        .container {
+            width: 90vw;
+            height: 90vh;
+            max-width: 90vh;
+            max-height: 90vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: black;
+            border-radius: 5%;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: grey;
+        }
+
+        .player {
+            position: absolute;
+            width: 4%;
+            height: 2%;
+            border-radius: 50%;
+            background-color: #fff;
+            transition: all 0.1s linear;
+        }
+
+        .cursor {
+            position: absolute;
+            width: 2%;
+            height: 2%;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.2);
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="gameCanvas">
+            <div class="cursor" id="cursor"></div>
+        </div>
+    </div>
+    <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+    <script>
+        const gameCanvas = document.getElementById('gameCanvas');
+        const cursorEl = document.getElementById('cursor');
+
+        const players = {
+            local: null,
+            remote: null,
+            xPercent: 50,
+            yPercent: 50,
+            velocity: { x: 0, y: 0 },
+            maxSpeed: 0.5,
+            acceleration: 0.05,
+            friction: 0.05
+        };
+
+
+        let score = 0;
+        let targetXPercent = 0;
+        let targetYPercent = 0;
+
+        const staticPeerID = "HOST";
+        let peer = new Peer(), connections = [];
+        let isConnected = false;
+        let newPeerID;
+        console.log("Initializing PeerJS with random peer ID");
+
+   function createPlayer(id, isLocal = false) {
+      const player = {
+        id: id,
+        el: null,
+        xPercent: Math.random() * 100,
+        yPercent: Math.random() * 100,
+        velocity: { x: 0, y: 0 },
+        maxSpeed: 0.5,
+        acceleration: 0.05,
+        friction: 0.05,
+        color: `hsl(${Math.random() * 360}, 100%, 50%)`,
+        targetXPercent: Math.random() * 100,
+        targetYPercent: Math.random() * 100
+    };
+
+
+    const playerEl = document.createElement('div');
+    playerEl.className = 'player';
+    playerEl.style.backgroundColor = player.color;
+    gameCanvas.appendChild(playerEl);
+    player.el = playerEl;
+
+    if (isLocal) {
+        players.local = player;
+    } else {
+        players.remote = player;
+    }
+    updatePlayerPosition(player);
+}
+
+
+   function updatePlayerPosition(player) {
+        player.el.style.left = `${player.xPercent}%`;
+        player.el.style.top = `${player.yPercent}%`;
+   }
+
+
+        let isMoving = false;
+        let targetX = 0;
+        let targetY = 0;
+        let isCursorVisible = true;
+
+   function handleMove(event) {
+            const { clientX, clientY } = event.touches ? event.touches[0] : event;
+            const rect = gameCanvas.getBoundingClientRect();
+
+            const cursorX = clientX - rect.left;
+            const cursorY = clientY - rect.top;
+
+            const canvasWidth = gameCanvas.clientWidth;
+            const canvasHeight = gameCanvas.clientHeight;
+
+            const cursorXPercent = (cursorX / canvasWidth) * 100;
+            const cursorYPercent = (cursorY / canvasHeight) * 100;
+
+            if (cursorXPercent >= 0 && cursorXPercent <= 100 &&
+                cursorYPercent >= 0 && cursorYPercent <= 100) {
+
+                targetXPercent = cursorXPercent;
+                targetYPercent = cursorYPercent;
+
+                if (isCursorVisible) {
+                    cursorEl.style.left = `${cursorXPercent}%`;
+                    cursorEl.style.top = `${cursorYPercent}%`;
+                }
+            }
+        }
+
+   function handleMouseDown(event) {
+            isMoving = true;
+            isCursorVisible = true;
+            cursorEl.style.opacity = '0.3';
+            handleMove(event);
+        }
+
+   function handleMouseUp() {
+            isMoving = false;
+            isCursorVisible = true;
+            cursorEl.style.opacity = '1';
+        }
+
+
+   function movePlayer(player) {
+    if (player === players.local) {
+        const dx = targetXPercent - player.xPercent;
+        const dy = targetYPercent - player.yPercent;
+
+        if (isMoving) {
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const direction = distance > 0 ? { x: dx / distance, y: dy / distance } : { x: 0, y: 0 };
+
+            player.velocity.x += direction.x * player.acceleration;
+            player.velocity.y += direction.y * player.acceleration;
+
+            const speed = Math.sqrt(player.velocity.x ** 2 + player.velocity.y ** 2);
+            if (speed > player.maxSpeed) {
+                player.velocity.x *= player.maxSpeed / speed;
+                player.velocity.y *= player.maxSpeed / speed;
+            }
+            player.xPercent += player.velocity.x;
+            player.yPercent += player.velocity.y;
+        } else {
+            player.velocity.x *= (1 - player.friction);
+            player.velocity.y *= (1 - player.friction);
+            player.xPercent += player.velocity.x;
+            player.yPercent += player.velocity.y;
+            if (Math.abs(player.velocity.x) < 0.001 && Math.abs(player.velocity.y) < 0.001) {
+                player.velocity.x = 0;
+                player.velocity.y = 0;
+            }
+        }
+
+        updatePlayerPosition(player);
+        
+        if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+            broadcastPosition();
+        }
+    } else if (player === players.remote) {
+        updateRemotePlayerPosition({ id: player.id, x: player.xPercent, y: player.yPercent });
+    }
+}
+
+
+let lastBroadcastTime = 0;
+const broadcastInterval = 69;
+
+   function broadcastPosition() {
+    const currentTime = Date.now();
+    if (isConnected && players.local && (currentTime - lastBroadcastTime > broadcastInterval)) {
+        connections.forEach(conn => {
+            conn.send({
+                type: 'position',
+                id: players.local.id,
+                x: players.local.xPercent,
+                y: players.local.yPercent
+            });
+        });
+        lastBroadcastTime = currentTime;
+    }
+   }
+
+   function interpolatePosition(player, targetXPercent, targetYPercent) {
+    const interpolationFactor = 0.8;
+    player.xPercent += (targetXPercent - player.xPercent) * interpolationFactor;
+    player.yPercent += (targetYPercent - player.yPercent) * interpolationFactor;
+    updatePlayerPosition(player);
+  }
+
+   function updateRemotePlayerPosition(data) {
+    if (!players.remote) {
+        createPlayer(data.id, false);
+    }
+
+    players.remote.targetXPercent = data.x;
+    players.remote.targetYPercent = data.y;
+
+    interpolatePosition(players.remote, players.remote.targetXPercent, players.remote.targetYPercent);  
+  }
+
+
+
+   function connect(peerID) {
+            if (isConnected) {
+                console.log("Connection attempt blocked: already connected to a peer.");
+                return;
+            }
+            
+            console.log(`Attempting to connect to peer ID: ${peerID}`);
+            const conn = peer.connect(peerID);
+
+            conn.on('open', () => {
+                console.log(`Connection successful to peer: ${peerID}`);
+                connections.push(conn);
+                isConnected = true;
+                setupConnection(conn);
+            });
+
+            conn.on('error', err => {
+                console.error(`Connection error to peer ${peerID}:`, err);
+            });
+        }
+
+   function inheritStaticPeerID() {
+            console.log(`Re-initializing PeerJS with static peer ID: ${staticPeerID}`);
+            peer = new Peer(staticPeerID);
+
+            peer.on('open', () => {
+                console.log(`Peer opened with static peer ID: ${staticPeerID}`);
+                setupIncomingConnections();
+            });
+
+            peer.on('error', err => {
+                if (err.type === 'unavailable-id') {
+                    console.warn("Peer ID is unavailable, retrying...");
+                } else {
+                    console.error("PeerJS error:", err);
+                }
+            });
+        }
+
+   function setupIncomingConnections() {
+            peer.on('connection', conn => {
+                if (isConnected) {
+                    console.log("Connection attempt blocked: already connected.");
+                    conn.close();
+                    return;
+                }
+
+                console.log("New client connected.");
+                console.log("Closing existing peer connections.");
+                connections.forEach(c => c.close());
+                connections = [];
+                connections.push(conn);
+                isConnected = true;
+                setupConnection(conn);
+
+                newPeerID = `HOST_${Date.now()}_${Math.floor(Math.random() * 999999999)}`;
+
+                console.log(`Generating a new peer ID for the host: ${newPeerID}`);
+
+                conn.on('open', () => {
+                    conn.send(newPeerID);
+                    console.log(`Sent new peer ID to client:${newPeerID}`);
+                });
+            });
+        }
+
+   function setupConnection(conn) {
+            console.log("Setting up data connection.");
+            console.log(`Connected to peer ID: ${conn.peer}`);
+
+            conn.on('data', data => {
+                console.log("Data received from peer:", data);
+
+                if (typeof data === 'object' && data.type) {
+                    switch (data.type) {
+                        case 'position':
+                            updateRemotePlayerPosition(data);
+                            break;
+                        case 'score':
+                            updateRemotePlayerScore(data);
+                            break;
+                    }
+                }
+
+            });
+
+            conn.on('close', () => {
+                console.warn("Connection closed.");
+                isConnected = false;
+                players.remote = null;
+            });
+
+            conn.on('error', err => {
+                console.error("Error in connection:", err);
+            });
+        }
+
+   function init() {
+            createPlayer('local', true);
+            gameCanvas.addEventListener('mousemove', handleMove);
+            gameCanvas.addEventListener('mousedown', handleMouseDown);
+            gameCanvas.addEventListener('mouseup', handleMouseUp);
+            gameCanvas.addEventListener('touchstart', handleMouseDown);
+            gameCanvas.addEventListener('touchend', handleMouseUp);
+            gameCanvas.addEventListener('touchmove', handleMove);
+
+            peer.on('open', () => {
+                console.log("PeerJS connection opened with random peer ID.");
+                connect(staticPeerID);
+            });
+
+            peer.on('error', err => {
+                if (err.type === 'peer-unavailable') {
+                    console.warn(`Peer ${staticPeerID} unavailable, inheriting static peer ID.`);
+                    inheritStaticPeerID();
+                } else {
+                    console.error("Unhandled PeerJS error:", err);
+                }
+            });
+
+requestAnimationFrame(function gameLoop() {
+    if (players.local && (isMoving || players.local.velocity.x !== 0 || players.local.velocity.y !== 0)) {
+        movePlayer(players.local);
+    }
+    if (players.remote) {
+        movePlayer(players.remote);
+    }
+    requestAnimationFrame(gameLoop);
+});
+
+        }
+
+        init();
+    </script>
+</body>
+</html>
